@@ -24,10 +24,9 @@ export default defineContentScript({
 
     if (adapter.zoomSrc) {
       const zoomSrc = adapter.zoomSrc.bind(adapter);
-      startHoverZoom(
-        zoomSrc,
-        () => settings.hoverZoom && adapter.isPlaytestPage(),
-      );
+      const isZoomPage = () =>
+        adapter.isZoomPage ? adapter.isZoomPage() : adapter.isTargetPage();
+      startHoverZoom(zoomSrc, () => settings.hoverZoom && isZoomPage());
     }
 
     watchSettings((next) => {

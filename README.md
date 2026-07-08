@@ -1,10 +1,12 @@
 # MTG Playtest 日本語化
 
-Moxfield / Archidekt の Playtest(ソリティア)画面で、カード画像を**公式の日本語版印刷の画像**に差し替える Chrome 拡張機能です。翻訳データは [Scryfall](https://scryfall.com/) の日本語版 printing を使うため、機械翻訳ではなく公式訳が表示されます。
+Moxfield / Archidekt のデッキ画面と Playtest(ソリティア)画面で、カード画像を**公式の日本語版印刷の画像**に差し替える Chrome 拡張機能です。翻訳データは [Scryfall](https://scryfall.com/) の日本語版 printing を使うため、機械翻訳ではなく公式訳が表示されます。
 
 - 日本語版が存在しないカード(再録のない古いカードなど)は英語のまま表示されます
-- 対応画面: Moxfield `moxfield.com/decks/{id}/goldfish`、Archidekt `archidekt.com/playtester-v2/{id}`
-- Archidektではカードにマウスを乗せると拡大表示します(Moxfieldの標準ホバー拡大に相当。ポップアップでOFFにできます)
+- 対応画面:
+  - Moxfield: `moxfield.com/decks/{id}` 配下(デッキビュー、primer、Playtest = goldfish)
+  - Archidekt: `archidekt.com/decks/{id}`(デッキビュー)と `archidekt.com/playtester-v2/{id}`(Playtest)
+- ArchidektのPlaytestではカードにマウスを乗せると拡大表示します(Moxfieldの標準ホバー拡大に相当。ポップアップでOFFにできます)
 
 ## インストール(ビルド済みを使う)
 

@@ -1,8 +1,11 @@
 import type { CardRef } from '../scryfall';
 import type { SiteAdapter } from '../swapper';
 
-/** Playtest画面のURL: /decks/{publicId}/goldfish */
-const GOLDFISH_PATH = /^\/decks\/([^/]+)\/goldfish/;
+/**
+ * 対象画面のURL: /decks/{publicId}(デッキビュー)とその配下
+ * (/goldfish = Playtest、/primer 等を含む)
+ */
+const DECK_PATH = /^\/decks\/([^/]+)/;
 /**
  * カード画像URL(実測):
  * - 通常カード:   https://assets.moxfield.net/cards/card-{moxfieldId}-normal.webp
@@ -23,7 +26,7 @@ export function createMoxfieldAdapter(): SiteAdapter {
   let loading: Promise<void> | null = null;
 
   function currentDeckId(): string | null {
-    return GOLDFISH_PATH.exec(location.pathname)?.[1] ?? null;
+    return DECK_PATH.exec(location.pathname)?.[1] ?? null;
   }
 
   async function ensureDeckData(): Promise<void> {
@@ -52,7 +55,7 @@ export function createMoxfieldAdapter(): SiteAdapter {
   }
 
   return {
-    isPlaytestPage: () => currentDeckId() !== null,
+    isTargetPage: () => currentDeckId() !== null,
 
     async identify(img: HTMLImageElement): Promise<CardRef | null> {
       const match = CARD_IMAGE_SRC.exec(img.getAttribute('src') ?? '');

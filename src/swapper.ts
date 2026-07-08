@@ -1,8 +1,10 @@
 import { lookupJapaneseImages, type CardRef } from './scryfall';
 
 export interface SiteAdapter {
-  /** 現在のURLがPlaytest画面か(SPA遷移があるため毎回チェックする) */
-  isPlaytestPage(): boolean;
+  /** 現在のURLが日本語化の対象画面か(SPA遷移があるため毎回チェックする) */
+  isTargetPage(): boolean;
+  /** 現在のURLがホバー拡大の対象画面か(未定義なら isTargetPage と同じ) */
+  isZoomPage?(): boolean;
   /** imgからカード識別子を得る。対象外のimgなら null */
   identify(img: HTMLImageElement): CardRef | Promise<CardRef | null> | null;
   /** 両面カードの裏面画像を表示中か */
@@ -51,7 +53,7 @@ export function startSwapper(
   rescan();
 
   async function processImg(img: HTMLImageElement): Promise<void> {
-    if (!isEnabled() || !adapter.isPlaytestPage()) return;
+    if (!isEnabled() || !adapter.isTargetPage()) return;
 
     const src = img.getAttribute('src') ?? '';
     // 差し替え済み(または元々Scryfall画像)なら何もしない。これが無限ループ防止も兼ねる

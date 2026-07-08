@@ -3,6 +3,8 @@ import type { SiteAdapter } from '../swapper';
 
 /** Playtest画面のURL: /playtester-v2/{deckId} (旧 /playtester/ も許容) */
 const PLAYTESTER_PATH = /^\/playtester(-v2)?\//;
+/** デッキビュー画面のURL: /decks/{deckId} */
+const DECK_PATH = /^\/decks\/\d+/;
 
 /**
  * カード画像URL(実測 2026-07):
@@ -21,7 +23,12 @@ const ALT_NAME = /^(.+?) \([a-z0-9]+\) \S+$/;
 
 export function createArchidektAdapter(): SiteAdapter {
   return {
-    isPlaytestPage: () => PLAYTESTER_PATH.test(location.pathname),
+    isTargetPage: () =>
+      PLAYTESTER_PATH.test(location.pathname) ||
+      DECK_PATH.test(location.pathname),
+
+    // ホバー拡大はPlaytest画面のみ(デッキビューにはサイト標準のプレビューがある)
+    isZoomPage: () => PLAYTESTER_PATH.test(location.pathname),
 
     identify(img: HTMLImageElement): CardRef | null {
       const src = img.getAttribute('src') ?? '';
