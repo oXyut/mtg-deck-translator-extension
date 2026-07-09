@@ -26,6 +26,7 @@ interface ScryfallCardFace {
 }
 
 interface ScryfallCard {
+  id: string;
   name: string;
   lang: string;
   oracle_id?: string;
@@ -125,12 +126,7 @@ export async function lookupJapaneseImages(
 }
 
 async function lookupByScryfallId(id: string): Promise<JpLookupResult> {
-  const card = await enqueue(async () => {
-    const res = await fetch(`${API}/cards/${id}`);
-    if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`Scryfall ${res.status}`);
-    return (await res.json()) as ScryfallCard;
-  });
+  const card = await resolvePrinting(id);
   if (!card) return null;
 
   // 元々日本語(の文字で印刷された)printingが選ばれているならそのまま使う
@@ -138,6 +134,65 @@ async function lookupByScryfallId(id: string): Promise<JpLookupResult> {
   if (!card.oracle_id) return null;
 
   return enqueue(() => searchJapanesePrinting(`oracleid:${card.oracle_id}`));
+}
+
+/** /cards/collection は1リクエストで75件まで解決できる */
+const COLLECTION_BATCH_MAX = 75;
+/** 同時に発生した解決要求をまとめる待ち時間 */
+const BATCH_WINDOW_MS = 50;
+
+interface PendingResolve {
+  id: string;
+  resolve: (card: ScryfallCard | null) => void;
+  reject: (error: unknown) => void;
+}
+
+let batchQueue: PendingResolve[] = [];
+let batchTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * 印刷のScryfall IDからカード情報を引く。
+ * 1件ずつ GET /cards/{id} する代わりに、短い時間窓でまとめて
+ * POST /cards/collection に載せることで、デッキ初回読み込みの
+ * リクエスト数をほぼ半減させる。
+ */
+function resolvePrinting(id: string): Promise<ScryfallCard | null> {
+  return new Promise((resolve, reject) => {
+    batchQueue.push({ id, resolve, reject });
+    if (batchQueue.length >= COLLECTION_BATCH_MAX) {
+      flushBatch();
+    } else if (batchTimer === undefined) {
+      batchTimer = setTimeout(flushBatch, BATCH_WINDOW_MS);
+    }
+  });
+}
+
+function flushBatch(): void {
+  if (batchTimer !== undefined) {
+    clearTimeout(batchTimer);
+    batchTimer = undefined;
+  }
+  while (batchQueue.length > 0) {
+    const items = batchQueue.splice(0, COLLECTION_BATCH_MAX);
+    void enqueue(() => fetchCollection(items));
+  }
+}
+
+async function fetchCollection(items: PendingResolve[]): Promise<void> {
+  try {
+    const res = await fetch(`${API}/cards/collection`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifiers: items.map((i) => ({ id: i.id })) }),
+    });
+    if (!res.ok) throw new Error(`Scryfall ${res.status}`);
+    const json = (await res.json()) as { data?: ScryfallCard[] };
+    const byId = new Map((json.data ?? []).map((c) => [c.id, c]));
+    // not_found に落ちたIDは null(=日本語版なし扱いで英語のまま)
+    for (const item of items) item.resolve(byId.get(item.id) ?? null);
+  } catch (error) {
+    for (const item of items) item.reject(error);
+  }
 }
 
 /**
