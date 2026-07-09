@@ -105,6 +105,8 @@ export function startPriceOverlay(
       const text = el.textContent?.trim() ?? '';
       if (text.length === 0 || text.length > 28) continue;
       if (el.dataset.jpPriceDone === text) continue;
+      // 購入ボタン(Buy @ 〇〇)等のリンク内の価格は米国店舗の実売額なので触らない
+      if (el.closest('a, button') !== null) continue;
       // 既に処理済みの要素の内側は触らない
       if (el.closest('[data-jp-price-done]') !== null && !el.dataset.jpPriceDone)
         continue;
