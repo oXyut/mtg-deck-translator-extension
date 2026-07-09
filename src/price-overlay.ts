@@ -4,20 +4,12 @@ import { lookupJapaneseImages } from './scryfall';
 import type { DeckEntry, SiteAdapter } from './swapper';
 
 /**
- * ページ上のドル価格表示を日本の店舗価格(円)に置き換え、
  * デッキ合計金額の円建てバッジ(クリックで内訳パネル)を表示する。
  * 価格の取得自体はbackground service worker(entrypoints/background.ts)が行う。
- * バッジ類はサイト側の右下のUIと重ならないよう左下に置く。
+ * ※ページ上のドル価格を個別に円へ置き換える機能は、Moxfieldのプレビュー価格が
+ *   カード画像と共通コンテナを持たずカードの特定が安定しなかったため撤去した
+ *   (v0.11.0)。経緯は git log を参照。
  */
-
-/** "$10.99 / $12.99" のようなペア表示のコンテナ */
-const PAIR_RE = /^\$[\d,]+(?:\.\d+)?\s*\/\s*\$[\d,]+(?:\.\d+)?$/;
-/** "$10.99" 単体の葉要素 */
-const SINGLE_RE = /^\$[\d,]+(?:\.\d+)?$/;
-/** 価格要素からカード画像を探すときに遡る最大の階層(プレビュー価格は深めの位置にある) */
-const MAX_ANCESTOR_DEPTH = 10;
-/** コンテナ内のimgがこれより多い場合は「どのカードの価格か」を特定できないとみなす */
-const MAX_IMGS_IN_CONTAINER = 12;
 
 type RequestPrice = (name: string) => Promise<JpPrice>;
 
@@ -44,11 +36,6 @@ function storeLabel(store: string): string {
   return store;
 }
 
-function isPriceOnly(text: string | null): boolean {
-  const t = (text ?? '').trim();
-  return SINGLE_RE.test(t) || PAIR_RE.test(t);
-}
-
 /** 価格源のページURL(晴れる屋の商品検索 / Wisdom Guildのカードページ) */
 function sourceUrl(name: string, linkHareruya: boolean): string {
   const front = encodeURIComponent(frontFaceName(name));
@@ -57,18 +44,11 @@ function sourceUrl(name: string, linkHareruya: boolean): string {
     : `https://wonder.wisdom-guild.net/price/${front}/`;
 }
 
-function displayOf(p: JpPrice): { text: string; title: string } | null {
-  if (p.value === null) return null;
-  return {
-    text: fmt(p.value) + (p.approximate ? '*' : ''),
-    title: `${p.sourceLabel ?? ''}: ${fmt(p.value)}`,
-  };
-}
-
 export function startPriceOverlay(
   adapter: SiteAdapter,
   isEnabled: () => boolean,
   getStore: () => string,
+  bottomPx: number,
 ): void {
   const requestPrice: RequestPrice = (name) =>
     browser.runtime.sendMessage({
@@ -77,163 +57,7 @@ export function startPriceOverlay(
       store: getStore(),
     }) as Promise<JpPrice>;
 
-  if (adapter.getCardName) startDollarSwap(adapter, isEnabled, requestPrice);
-  startTotalBadge(adapter, isEnabled, requestPrice, getStore);
-}
-
-/** ページ上のドル価格をカードに紐づけて円に置き換える */
-function startDollarSwap(
-  adapter: SiteAdapter,
-  isEnabled: () => boolean,
-  requestPrice: RequestPrice,
-): void {
-  const getCardName = adapter.getCardName!.bind(adapter);
-
-  /** 価格要素の近くのカード画像からカード名を特定する */
-  /**
-   * imgが多すぎる階層に達したときのフォールバック:
-   * 価格要素と同じ縦の列(X中心が画像の幅内)にあり、縦方向に近い
-   * カード画像を候補にする。プレビュー画像と価格は小さな共通コンテナを
-   * 持たないことがある(Moxfieldで実測)ための近接ヒューリスティック
-   */
-  function columnCandidates(
-    el: Element,
-    imgs: NodeListOf<HTMLImageElement>,
-  ): HTMLImageElement[] {
-    const rect = el.getBoundingClientRect();
-    const cx = (rect.left + rect.right) / 2;
-    const cy = (rect.top + rect.bottom) / 2;
-    return [...imgs]
-      .map((img) => ({ img, r: img.getBoundingClientRect() }))
-      .filter(
-        ({ r }) =>
-          r.width > 50 && // アイコン類を除外
-          cx >= r.left &&
-          cx <= r.right &&
-          Math.abs((r.top + r.bottom) / 2 - cy) < 600,
-      )
-      .sort(
-        (a, b) =>
-          Math.abs((a.r.top + a.r.bottom) / 2 - cy) -
-          Math.abs((b.r.top + b.r.bottom) / 2 - cy),
-      )
-      .slice(0, 3)
-      .map(({ img }) => img);
-  }
-
-  async function findCardName(el: Element): Promise<string | null> {
-    let node: Element | null = el.parentElement;
-    for (let depth = 0; node && depth < MAX_ANCESTOR_DEPTH; depth++) {
-      const imgs = node.querySelectorAll('img');
-      if (imgs.length > MAX_IMGS_IN_CONTAINER) {
-        debug('カード特定: 深さ', depth, 'でimg', imgs.length, '個 → 近接探索へ');
-        for (const img of columnCandidates(el, imgs)) {
-          const name = await getCardName(img);
-          if (name) {
-            debug('近接カード特定:', name);
-            return name;
-          }
-        }
-        debug('近接カード特定失敗: 同じ列にカード画像なし');
-        return null;
-      }
-      for (const img of imgs) {
-        const name = await getCardName(img);
-        if (name) {
-          debug('カード特定: 深さ', depth, '→', name);
-          return name;
-        }
-      }
-      node = node.parentElement;
-    }
-    debug('カード特定失敗: 祖先', MAX_ANCESTOR_DEPTH, '階層にカード画像なし');
-    return null;
-  }
-
-  const processing = new WeakSet<Element>();
-
-  /**
-   * "$A / $B" のペア(近くの祖先)があればそれを置き換え対象にする。
-   * 1枚のカードに対する円価格は1つなので、ペアごと単一表示にまとめる
-   */
-  function replaceTarget(el: HTMLElement): HTMLElement {
-    let node: HTMLElement | null = el.parentElement;
-    for (let i = 0; i < 2 && node; i++, node = node.parentElement) {
-      if (PAIR_RE.test(node.textContent?.trim() ?? '')) return node;
-    }
-    return el;
-  }
-
-  async function processEl(el: HTMLElement): Promise<void> {
-    const target = replaceTarget(el);
-    if (processing.has(target)) return;
-    processing.add(target);
-    try {
-      const original = target.textContent?.trim() ?? '';
-      debug('価格候補を処理:', JSON.stringify(original), target.tagName);
-      const name = await findCardName(target);
-      if (!name) return;
-      const price = await requestPrice(name);
-      debug('価格取得:', name, '→', JSON.stringify(price));
-      const display = displayOf(price);
-      if (!display) return;
-      // 待っている間に表示が変わっていたら触らない(次のスキャンで再処理)
-      if ((target.textContent?.trim() ?? '') !== original) {
-        debug('置換中止: 処理中に表示が変わった', JSON.stringify(original));
-        return;
-      }
-      target.textContent = display.text;
-      target.title = `${name}: ${display.title} / 元の表示: ${original}`;
-      target.dataset.jpPriceDone = display.text;
-      // 価格単体のリンクだった場合は、リンク先を価格源のページに付け替える
-      const anchor = target.closest('a');
-      if (anchor && isPriceOnly(anchor.textContent)) {
-        anchor.setAttribute('href', sourceUrl(name, price.linkHareruya));
-        anchor.setAttribute('target', '_blank');
-        anchor.setAttribute('rel', 'noopener noreferrer');
-      }
-    } finally {
-      processing.delete(target);
-    }
-  }
-
-  function scan(): void {
-    if (!isEnabled()) {
-      debug('スキャン停止: 設定OFFまたは対象外ページ');
-      return;
-    }
-    const candidates = document.querySelectorAll<HTMLElement>(
-      'span, div, td, em, strong, b, p, a',
-    );
-    for (const el of candidates) {
-      const text = el.textContent?.trim() ?? '';
-      if (text.length === 0 || text.length > 28) continue;
-      if (el.dataset.jpPriceDone === text) continue;
-      // 「Buy @ 〇〇 $x.xx」のようなラベル付きボタンは米国店舗の実売額なので触らない。
-      // 価格だけのリンク(プレビュー下の価格等)は対象にする
-      const link = el.closest('a, button');
-      if (link !== null && !isPriceOnly(link.textContent)) continue;
-      // 既に処理済みの要素の内側は触らない
-      if (el.closest('[data-jp-price-done]') !== null && !el.dataset.jpPriceDone)
-        continue;
-
-      const isPair = PAIR_RE.test(text) && el.childElementCount <= 3;
-      const isSingle = el.childElementCount === 0 && SINGLE_RE.test(text);
-      if (isPair || isSingle) void processEl(el);
-    }
-  }
-
-  let scanTimer: ReturnType<typeof setTimeout> | undefined;
-  const observer = new MutationObserver(() => {
-    clearTimeout(scanTimer);
-    scanTimer = setTimeout(scan, 800);
-  });
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-    characterData: true,
-  });
-  scan();
+  startTotalBadge(adapter, isEnabled, requestPrice, getStore, bottomPx);
 }
 
 /** 内訳パネル1行分 */
@@ -253,6 +77,7 @@ function startTotalBadge(
   isEnabled: () => boolean,
   requestPrice: RequestPrice,
   getStore: () => string,
+  bottomPx: number,
 ): void {
   if (!adapter.getDeckList) return;
   const getDeckList = adapter.getDeckList.bind(adapter);
@@ -268,7 +93,7 @@ function startTotalBadge(
     badge.style.cssText = [
       'position: fixed',
       'left: 16px',
-      'bottom: 16px',
+      `bottom: ${bottomPx}px`,
       'z-index: 2147483647',
       'background: rgba(20, 20, 24, 0.88)',
       'color: #fff',
@@ -307,11 +132,11 @@ function startTotalBadge(
   function renderPanel(): void {
     if (!panel) {
       panel = document.createElement('div');
-      // 下から: 合計バッジ(16) → 進捗バッジ(52) → 内訳パネル(92) の順に積む
+      // バッジ(bottomPx) → 進捗バッジ(+36px) → 内訳パネル(+76px) の順に積む
       panel.style.cssText = [
         'position: fixed',
         'left: 16px',
-        'bottom: 92px',
+        `bottom: ${bottomPx + 76}px`,
         'z-index: 2147483647',
         'width: 360px',
         'max-height: 60vh',
@@ -378,6 +203,7 @@ function startTotalBadge(
 
     // 集計に使った店舗モード(集計中に設定が変わっても表示と中身がずれないよう固定)
     const usedStore = storeLabel(getStore());
+    debug('デッキ合計の集計開始:', usedStore, list.length, '種');
     rows = [];
     const totalCards = list.reduce((s, e) => s + e.quantity, 0);
     let sum = 0;

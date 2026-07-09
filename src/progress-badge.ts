@@ -4,7 +4,7 @@ import type { ProgressListener } from './progress';
  * 画面右下に「日本語化中… done/total」のバッジを表示する。
  * 全件完了すると少し表示してからフェードアウトする。
  */
-export function createProgressBadge(): ProgressListener {
+export function createProgressBadge(bottomPx: number): ProgressListener {
   let badge: HTMLDivElement | null = null;
   let label: HTMLSpanElement | null = null;
   let bar: HTMLDivElement | null = null;
@@ -13,12 +13,11 @@ export function createProgressBadge(): ProgressListener {
   function ensure(): void {
     if (badge) return;
     badge = document.createElement('div');
-    // サイト側の右下の浮遊UI(Moxfieldのスクロールボタン等)と重ならないよう左下に置く。
-    // 合計バッジ(左下)とも重ならないよう1段上にする
+    // サイト側の右下の浮遊UIと重ならないよう左下に置く(合計バッジの1段上)
     badge.style.cssText = [
       'position: fixed',
       'left: 16px',
-      'bottom: 52px',
+      `bottom: ${bottomPx}px`,
       'z-index: 2147483647',
       'pointer-events: none',
       'background: rgba(20, 20, 24, 0.88)',

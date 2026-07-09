@@ -23,7 +23,9 @@ export default defineContentScript({
 
     let settings: Settings = await getSettings();
 
-    setProgressListener(createProgressBadge());
+    // Moxfieldは画面下部に固定フッターがあるため、バッジ類をその上に置く
+    const badgeBottom = site === 'moxfield' ? 76 : 16;
+    setProgressListener(createProgressBadge(badgeBottom + 36));
 
     const { rescan, restoreAll } = startSwapper(adapter, () => settings[site]);
 
@@ -31,6 +33,7 @@ export default defineContentScript({
       adapter,
       () => settings.jpPrices && adapter.isTargetPage(),
       () => settings.priceStore,
+      badgeBottom,
     );
 
     if (adapter.zoomSrc) {
