@@ -14,8 +14,8 @@ import type { DeckEntry, SiteAdapter } from './swapper';
 const PAIR_RE = /^\$[\d,]+(?:\.\d+)?\s*\/\s*\$[\d,]+(?:\.\d+)?$/;
 /** "$10.99" 単体の葉要素 */
 const SINGLE_RE = /^\$[\d,]+(?:\.\d+)?$/;
-/** 価格要素からカード画像を探すときに遡る最大の階層 */
-const MAX_ANCESTOR_DEPTH = 6;
+/** 価格要素からカード画像を探すときに遡る最大の階層(プレビュー価格は深めの位置にある) */
+const MAX_ANCESTOR_DEPTH = 10;
 /** コンテナ内のimgがこれより多い場合は「どのカードの価格か」を特定できないとみなす */
 const MAX_IMGS_IN_CONTAINER = 12;
 
@@ -87,30 +87,43 @@ function startDollarSwap(
 
   const processing = new WeakSet<Element>();
 
+  /**
+   * "$A / $B" のペア(近くの祖先)があればそれを置き換え対象にする。
+   * 1枚のカードに対する円価格は1つなので、ペアごと単一表示にまとめる
+   */
+  function replaceTarget(el: HTMLElement): HTMLElement {
+    let node: HTMLElement | null = el.parentElement;
+    for (let i = 0; i < 2 && node; i++, node = node.parentElement) {
+      if (PAIR_RE.test(node.textContent?.trim() ?? '')) return node;
+    }
+    return el;
+  }
+
   async function processEl(el: HTMLElement): Promise<void> {
-    if (processing.has(el)) return;
-    processing.add(el);
+    const target = replaceTarget(el);
+    if (processing.has(target)) return;
+    processing.add(target);
     try {
-      const original = el.textContent?.trim() ?? '';
-      const name = await findCardName(el);
+      const original = target.textContent?.trim() ?? '';
+      const name = await findCardName(target);
       if (!name) return;
       const price = await requestPrice(name);
       const display = displayOf(price);
       if (!display) return;
       // 待っている間に表示が変わっていたら触らない(次のスキャンで再処理)
-      if ((el.textContent?.trim() ?? '') !== original) return;
-      el.textContent = display.text;
-      el.title = `${name}: ${display.title} / 元の表示: ${original}`;
-      el.dataset.jpPriceDone = display.text;
+      if ((target.textContent?.trim() ?? '') !== original) return;
+      target.textContent = display.text;
+      target.title = `${name}: ${display.title} / 元の表示: ${original}`;
+      target.dataset.jpPriceDone = display.text;
       // 価格単体のリンクだった場合は、リンク先を価格源のページに付け替える
-      const anchor = el.closest('a');
+      const anchor = target.closest('a');
       if (anchor && isPriceOnly(anchor.textContent)) {
         anchor.setAttribute('href', sourceUrl(name, price.linkHareruya));
         anchor.setAttribute('target', '_blank');
         anchor.setAttribute('rel', 'noopener noreferrer');
       }
     } finally {
-      processing.delete(el);
+      processing.delete(target);
     }
   }
 
