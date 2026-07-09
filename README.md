@@ -30,8 +30,10 @@ npm run zip      # ストア提出用zip
 ```
 content script (MutationObserver)
   → site adapter が img からカードを識別
-      Moxfield : img src の card-{MoxfieldID}- を、デッキ公開API
-                 (api2.moxfield.com/v3/decks/all/{id}) の JSON で Scryfall ID に変換
+      Moxfield : img src の card-{ID}- / card-face-{面ID}- を、デッキ公開API
+                 (api2.moxfield.com/v3/decks/all/{id}) の JSON で Scryfall ID に変換。
+                 サイト由来のScryfall直リンク画像はURLからIDを抽出。
+                 どちらも失敗したら alt のカード名で検索
       Archidekt: img src (card-images.archidekt.com/normal/front/x/y/{uuid}.jpg) に
                  Scryfall UUID がそのまま入っている(alt "名前 (set) 番号" のフォールバックあり)
   → Scryfall で日本語版 printing を検索
@@ -58,7 +60,8 @@ content script (MutationObserver)
 
 ## 既知の制限
 
-- **非公開デッキ(Moxfield)**: デッキ公開APIが 403 を返すため差し替えできません(対応するにはページの fetch を傍受してデッキJSONを取得する MAIN world スクリプトが必要)
-- **トークン**: Playtest 中に追加したトークンはデッキJSONに含まれない場合があり、英語のまま表示されます
-- **両面カードの裏面**: 画像URLの `back` を含むかで判定するヒューリスティックのため、サイト側のURL形式変更で効かなくなる可能性があります
+- **カード名(alt)ベースのフォールバック時は選択精度が落ちる**: 非公開デッキ(Moxfield、デッキAPIが403)やデッキ対応表に無いカード(Playtest中に追加したトークン等)は、imgのaltのカード名でScryfallを検索します。動作はしますが、元printingが分からないため絵柄・セット一致の優先は効かず、最新の日本語版が選ばれます
+- **カード名が取れないimgは対象外**: altがカード名でないimg(例: Moxfieldのライブラリトップの `alt="Card Image"`)は、非公開デッキ等で対応表も使えない場合は英語のまま表示されます
+- **サイト側のDOM・画像URL形式に依存**: Moxfield/ArchidektがCDNやURL形式を変更すると識別できなくなる可能性があります(altフォールバックである程度は耐えます)
+- **機械翻訳はしない設計**: 日本語版printingが存在しないカード(再録のない古いカード、発売直後の未収録データ等)は常に英語のままです
 - アイコン未設定(Chrome標準のパズルアイコンが表示されます)
