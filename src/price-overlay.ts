@@ -21,8 +21,27 @@ const MAX_IMGS_IN_CONTAINER = 12;
 
 type RequestPrice = (name: string) => Promise<JpPrice>;
 
+/** localStorage.mtgJpDebug = '1' で価格処理のデバッグログを出す */
+function debug(...args: unknown[]): void {
+  try {
+    if (localStorage.getItem('mtgJpDebug') === '1') {
+      console.log('[MTGデッキ日本語化]', ...args);
+    }
+  } catch {
+    /* localStorage不可の環境では黙る */
+  }
+}
+
 function fmt(yen: number): string {
   return '¥' + yen.toLocaleString('ja-JP');
+}
+
+/** 設定値から店舗モードの表示名 */
+function storeLabel(store: string): string {
+  if (store === 'hareruya') return '晴れる屋';
+  if (store === 'lowest') return '店舗問わず最安';
+  if (store.startsWith('wg:')) return store.slice(3);
+  return store;
 }
 
 function isPriceOnly(text: string | null): boolean {
@@ -59,7 +78,7 @@ export function startPriceOverlay(
     }) as Promise<JpPrice>;
 
   if (adapter.getCardName) startDollarSwap(adapter, isEnabled, requestPrice);
-  startTotalBadge(adapter, isEnabled, requestPrice);
+  startTotalBadge(adapter, isEnabled, requestPrice, getStore);
 }
 
 /** ページ上のドル価格をカードに紐づけて円に置き換える */
@@ -75,13 +94,20 @@ function startDollarSwap(
     let node: Element | null = el.parentElement;
     for (let depth = 0; node && depth < MAX_ANCESTOR_DEPTH; depth++) {
       const imgs = node.querySelectorAll('img');
-      if (imgs.length > MAX_IMGS_IN_CONTAINER) return null;
+      if (imgs.length > MAX_IMGS_IN_CONTAINER) {
+        debug('カード特定中断: 深さ', depth, 'でimgが', imgs.length, '個(多すぎ)');
+        return null;
+      }
       for (const img of imgs) {
         const name = await getCardName(img);
-        if (name) return name;
+        if (name) {
+          debug('カード特定: 深さ', depth, '→', name);
+          return name;
+        }
       }
       node = node.parentElement;
     }
+    debug('カード特定失敗: 祖先', MAX_ANCESTOR_DEPTH, '階層にカード画像なし');
     return null;
   }
 
@@ -105,13 +131,18 @@ function startDollarSwap(
     processing.add(target);
     try {
       const original = target.textContent?.trim() ?? '';
+      debug('価格候補を処理:', JSON.stringify(original), target.tagName);
       const name = await findCardName(target);
       if (!name) return;
       const price = await requestPrice(name);
+      debug('価格取得:', name, '→', JSON.stringify(price));
       const display = displayOf(price);
       if (!display) return;
       // 待っている間に表示が変わっていたら触らない(次のスキャンで再処理)
-      if ((target.textContent?.trim() ?? '') !== original) return;
+      if ((target.textContent?.trim() ?? '') !== original) {
+        debug('置換中止: 処理中に表示が変わった', JSON.stringify(original));
+        return;
+      }
       target.textContent = display.text;
       target.title = `${name}: ${display.title} / 元の表示: ${original}`;
       target.dataset.jpPriceDone = display.text;
@@ -128,7 +159,10 @@ function startDollarSwap(
   }
 
   function scan(): void {
-    if (!isEnabled()) return;
+    if (!isEnabled()) {
+      debug('スキャン停止: 設定OFFまたは対象外ページ');
+      return;
+    }
     const candidates = document.querySelectorAll<HTMLElement>(
       'span, div, td, em, strong, b, p, a',
     );
@@ -179,6 +213,7 @@ function startTotalBadge(
   adapter: SiteAdapter,
   isEnabled: () => boolean,
   requestPrice: RequestPrice,
+  getStore: () => string,
 ): void {
   if (!adapter.getDeckList) return;
   const getDeckList = adapter.getDeckList.bind(adapter);
@@ -302,6 +337,8 @@ function startTotalBadge(
     const list = await getDeckList();
     if (!list || list.length === 0) return;
 
+    // 集計に使った店舗モード(集計中に設定が変わっても表示と中身がずれないよう固定)
+    const usedStore = storeLabel(getStore());
     rows = [];
     const totalCards = list.reduce((s, e) => s + e.quantity, 0);
     let sum = 0;
@@ -349,8 +386,8 @@ function startTotalBadge(
           if (!isEnabled() || location.pathname !== path) return;
           const suffix = settled < list.length ? ' 取得中…' : '';
           render(
-            `デッキ合計 ${fmt(sum)}${usedFallback ? '*' : ''} (${pricedCards}/${totalCards}枚)${suffix}`,
-            '設定した店舗の価格の合計。* はWisdom Guild平均で近似したカードを含む。' +
+            `デッキ合計(${usedStore}) ${fmt(sum)}${usedFallback ? '*' : ''} (${pricedCards}/${totalCards}枚)${suffix}`,
+            `${usedStore}モードでの合計。* はWisdom Guild平均で近似したカードを含む。` +
               '価格が取得できなかったカードは合計に含まれません。',
           );
           if (panel && panel.style.display !== 'none') renderPanel();
