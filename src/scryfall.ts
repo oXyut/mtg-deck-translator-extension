@@ -1,4 +1,5 @@
 import { getCached, setCached, type JpLookupResult } from './cache';
+import { lookupQueued, lookupSettled } from './progress';
 
 /**
  * imgが指すカードの識別子。
@@ -101,6 +102,7 @@ export async function lookupJapaneseImages(
   const pending = inflight.get(key);
   if (pending) return pending;
 
+  lookupQueued();
   const promise = (async () => {
     const result =
       ref.kind === 'scryfallId'
@@ -118,6 +120,7 @@ export async function lookupJapaneseImages(
     return undefined;
   } finally {
     inflight.delete(key);
+    lookupSettled();
   }
 }
 

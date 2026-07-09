@@ -1,4 +1,6 @@
 import { startHoverZoom } from '../src/hover-zoom';
+import { createProgressBadge } from '../src/progress-badge';
+import { setProgressListener } from '../src/progress';
 import { createArchidektAdapter } from '../src/sites/archidekt';
 import { createMoxfieldAdapter } from '../src/sites/moxfield';
 import { getSettings, watchSettings, type Settings } from '../src/settings';
@@ -19,6 +21,8 @@ export default defineContentScript({
       site === 'moxfield' ? createMoxfieldAdapter() : createArchidektAdapter();
 
     let settings: Settings = await getSettings();
+
+    setProgressListener(createProgressBadge());
 
     const { rescan, restoreAll } = startSwapper(adapter, () => settings[site]);
 
