@@ -1,4 +1,10 @@
 import { browser } from 'wxt/browser';
+import { askDeckAgent } from '../src/agent/service';
+import type {
+  AgentChatMessage,
+  AgentProgress,
+  DeckContext,
+} from '../src/agent/types';
 import { fetchJpPrice, type JpPrice, type PriceStore } from '../src/prices';
 
 /**
@@ -47,8 +53,33 @@ async function getJpPrice(name: string, store: PriceStore): Promise<JpPrice> {
 }
 
 export default defineBackground(() => {
-  browser.runtime.onMessage.addListener((message: unknown) => {
-    const msg = message as { type?: string; name?: string; store?: string };
+  browser.runtime.onMessage.addListener((message: unknown, sender) => {
+    const msg = message as {
+      type?: string;
+      name?: string;
+      store?: string;
+      deck?: DeckContext;
+      messages?: AgentChatMessage[];
+      requestId?: string;
+    };
+    if (
+      msg?.type === 'deck-agent' &&
+      msg.deck !== undefined &&
+      Array.isArray(msg.messages)
+    ) {
+      const tabId = sender.tab?.id;
+      const reportProgress = (progress: AgentProgress) => {
+        if (tabId === undefined || !msg.requestId) return;
+        void browser.tabs
+          .sendMessage(tabId, {
+            type: 'deck-agent-progress',
+            requestId: msg.requestId,
+            progress,
+          })
+          .catch(() => {});
+      };
+      return askDeckAgent(msg.deck, msg.messages, reportProgress);
+    }
     if (msg?.type === 'jp-price' && typeof msg.name === 'string') {
       const store =
         msg.store === 'lowest' || msg.store?.startsWith('wg:')

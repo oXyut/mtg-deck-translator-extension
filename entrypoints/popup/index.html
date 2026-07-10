@@ -22,6 +22,21 @@
         text-transform: none;
         margin: 12px 0 2px;
       }
+      input[type='text'],
+      input[type='password'],
+      select {
+        box-sizing: border-box;
+        width: 100%;
+      }
+      .field {
+        display: block;
+        padding-left: 24px;
+      }
+      .hint {
+        font-size: 11px;
+        color: #888;
+        padding-left: 24px;
+      }
       label {
         display: flex;
         align-items: center;
@@ -83,6 +98,30 @@
     </label>
     <div style="font-size: 11px; color: #888; padding-left: 24px;">
       店舗を変えたらページを再読み込みしてください
+    </div>
+    <h2>AIデッキ相談（プレビュー）</h2>
+    <label>
+      <input type="checkbox" id="agent-enabled" />
+      AIデッキ相談を表示
+    </label>
+    <label class="field">
+      AI提供元
+      <select id="agent-provider" style="margin-top: 2px;">
+        <option value="openai">OpenAI Responses API</option>
+      </select>
+    </label>
+    <label class="field">
+      モデル
+      <input id="agent-model" type="text" placeholder="gpt-5.4-mini" style="margin-top: 2px;" />
+    </label>
+    <label class="field">
+      OpenAI APIキー
+      <input id="agent-api-key" type="password" autocomplete="off" placeholder="sk-..." style="margin-top: 2px;" />
+    </label>
+    <div class="hint">
+      <span id="agent-key-status"></span><br />
+      キーは同期されず、この端末の拡張ローカル保存領域だけに保存されます。
+      <button id="clear-agent-key" type="button" style="font-size: 11px;">キーを削除</button>
     </div>
     <div class="footer">
       <button id="clear-cache">キャッシュをクリア</button>

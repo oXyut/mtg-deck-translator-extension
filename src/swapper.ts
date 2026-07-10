@@ -1,4 +1,5 @@
 import { lookupJapaneseImages, type CardRef } from './scryfall';
+import type { DeckContextData } from './deck-context';
 
 export interface SiteAdapter {
   /** 現在のURLが日本語化の対象画面か(SPA遷移があるため毎回チェックする) */
@@ -15,12 +16,16 @@ export interface SiteAdapter {
   getCardName?(img: HTMLImageElement): Promise<string | null>;
   /** メインデッキ+統率者の一覧(デッキ合計金額用)。取れなければ null */
   getDeckList?(): Promise<DeckEntry[] | null>;
+  /** AI相談用のメタデータ・候補カードを含むデッキ文脈。 */
+  getDeckContext?(): Promise<DeckContextData | null>;
 }
 
 export interface DeckEntry {
   /** 英語名 */
   name: string;
   quantity: number;
+  /** 統率者スロットのカードか。AIデッキ相談でEDHRECの調査対象を特定する。 */
+  isCommander?: boolean;
   /** 印刷のScryfall ID(日本語名の解決に使う。取れない場合は省略) */
   scryfallId?: string;
 }

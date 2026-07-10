@@ -1,5 +1,5 @@
 import { browser } from 'wxt/browser';
-import { frontFaceName, type JpPrice } from './prices';
+import { priceSourceUrl, type JpPrice } from './prices';
 import { lookupJapaneseImages } from './scryfall';
 import type { DeckEntry, SiteAdapter } from './swapper';
 
@@ -34,14 +34,6 @@ function storeLabel(store: string): string {
   if (store === 'lowest') return '店舗問わず最安';
   if (store.startsWith('wg:')) return store.slice(3);
   return store;
-}
-
-/** 価格源のページURL(晴れる屋の商品検索 / Wisdom Guildのカードページ) */
-function sourceUrl(name: string, linkHareruya: boolean): string {
-  const front = encodeURIComponent(frontFaceName(name));
-  return linkHareruya
-    ? `https://www.hareruyamtg.com/ja/products/search?product=${front}`
-    : `https://wonder.wisdom-guild.net/price/${front}/`;
 }
 
 export function startPriceOverlay(
@@ -86,10 +78,12 @@ function startTotalBadge(
   let panel: HTMLDivElement | null = null;
   let computedForPath: string | null = null;
   let rows: PricedRow[] = [];
+  let hiddenForAgentFullscreen = false;
 
   function ensureBadge(): HTMLDivElement {
     if (badge) return badge;
     badge = document.createElement('div');
+    badge.id = 'mtg-jp-price-badge';
     badge.style.cssText = [
       'position: fixed',
       'left: 16px',
@@ -110,6 +104,10 @@ function startTotalBadge(
   }
 
   function render(text: string, title: string): void {
+    if (hiddenForAgentFullscreen) {
+      hide();
+      return;
+    }
     const el = ensureBadge();
     el.textContent = text;
     el.title = title + '\nクリックで内訳を表示';
@@ -120,6 +118,13 @@ function startTotalBadge(
     if (badge) badge.style.display = 'none';
     if (panel) panel.style.display = 'none';
   }
+
+  document.addEventListener('mtg-agent-fullscreen-change', (event) => {
+    hiddenForAgentFullscreen = Boolean(
+      (event as CustomEvent<{ active?: boolean }>).detail?.active,
+    );
+    if (hiddenForAgentFullscreen) hide();
+  });
 
   function togglePanel(): void {
     if (panel && panel.style.display !== 'none') {
@@ -132,6 +137,7 @@ function startTotalBadge(
   function renderPanel(): void {
     if (!panel) {
       panel = document.createElement('div');
+      panel.id = 'mtg-jp-price-panel';
       // バッジ(bottomPx) → 進捗バッジ(+36px) → 内訳パネル(+76px) の順に積む
       panel.style.cssText = [
         'position: fixed',
@@ -169,7 +175,7 @@ function startTotalBadge(
       const label = row.jaName ?? row.name;
       link.textContent = `${label}${row.quantity > 1 ? ` ×${row.quantity}` : ''}`;
       link.title = row.name;
-      link.href = sourceUrl(row.name, row.linkHareruya);
+      link.href = priceSourceUrl(row.name, row.linkHareruya);
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
       link.style.cssText =
@@ -264,6 +270,10 @@ function startTotalBadge(
   // SPAなのでページ遷移でデッキが変わったら再計算(computedForPathで抑制)
   setInterval(() => {
     if (!isEnabled()) {
+      hide();
+      return;
+    }
+    if (hiddenForAgentFullscreen) {
       hide();
       return;
     }

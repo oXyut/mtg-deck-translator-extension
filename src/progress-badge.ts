@@ -9,10 +9,12 @@ export function createProgressBadge(bottomPx: number): ProgressListener {
   let label: HTMLSpanElement | null = null;
   let bar: HTMLDivElement | null = null;
   let hideTimer: number | undefined;
+  let hiddenForAgentFullscreen = false;
 
   function ensure(): void {
     if (badge) return;
     badge = document.createElement('div');
+    badge.id = 'mtg-jp-progress-badge';
     // サイト側の右下の浮遊UIと重ならないよう左下に置く(合計バッジの1段上)
     badge.style.cssText = [
       'position: fixed',
@@ -46,9 +48,23 @@ export function createProgressBadge(bottomPx: number): ProgressListener {
     document.documentElement.appendChild(badge);
   }
 
+  document.addEventListener('mtg-agent-fullscreen-change', (event) => {
+    hiddenForAgentFullscreen = Boolean(
+      (event as CustomEvent<{ active?: boolean }>).detail?.active,
+    );
+    if (hiddenForAgentFullscreen && badge) badge.style.display = 'none';
+    if (!hiddenForAgentFullscreen && badge) badge.style.display = '';
+  });
+
   return (done, total) => {
     ensure();
     clearTimeout(hideTimer);
+
+    if (hiddenForAgentFullscreen) {
+      badge!.style.display = 'none';
+      return;
+    }
+    badge!.style.display = '';
 
     if (total === 0) {
       badge!.style.opacity = '0';

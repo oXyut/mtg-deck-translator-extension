@@ -75,6 +75,22 @@ fetchにUser-Agentを付けるラッパーを忘れずに(Scryfallの罠3)。
 - ページのConsoleで `localStorage.mtgJpDebug = '1'` → 価格集計の判断過程が `[MTGデッキ日本語化]` プレフィックスで出る(解除は removeItem)
 - 画像差し替えの状態は `img.dataset.jpOriginalSrc / jpSwappedSrc` を見る
 
+## AIデッキ相談
+
+- `src/agent/service.ts` がユースケース層。UI・backgroundはLLM APIを直接知らない
+- `src/agent/types.ts` の `AgentProvider` が提供元境界。OpenAIのResponses API実装は `src/agent/openai.ts` に閉じ、Claude/Geminiは同じインターフェースのアダプターとして追加する
+- APIキーは `chrome.storage.local` にだけ保存する(`src/agent/settings.ts`)。`chrome.storage.sync` や会話履歴には保存しない
+- Scryfallは読み取り専用のfunction toolで、エージェントが呼んだ場合だけbackgroundで実行する。Web検索は公開APIを前提にせず、`edhrec.com`(採用傾向) / `commanderspellbook.com`(コンボ) / `magic.wizards.com`(禁止・ルール) / `scryfall.com`(カード情報) に制限して参照する
+- 会話履歴はページメモリ内の直近8件のみ。ページを再読み込みすると消える。デッキを自動編集するツールは意図的に公開しない
+- `deck-agent-progress` メッセージで、function toolの検索条件とWeb検索クエリをページ内パネルへ返す。タイムアウトは180秒、ツールラウンド上限は16回。調査が過剰にならないよう同一検索の繰り返しを促さないプロンプトも入れる
+- AI回答は `marked` でMarkdownへ変換後、`DOMPurify` の許可リストでサニタイズする。AIにはカードを `{{card:英語Oracle名}}` で出力するよう指示し、`src/chat-markdown.ts` が日本語名チップへ変換する。画像はホバー時だけ表示するが、日本語名解決は先行して行う。1回答あたり120枚までを安全弁として許容する
+- Responses APIのWeb検索出典は`url_citation` annotationから`AgentCitation`へ正規化する。`start_index`/`end_index`で本文中の内部markerを「出典 N」リンクへ置換し、位置が不正なものは回答末尾の出典リンク一覧へフォールバックする
+- カードチップの価格はホバー時に `jp-price` メッセージで取得する。`entrypoints/content.ts` が保持する現在の `priceStore` を渡すので、デッキ合計バッジと同じ店舗モード・background側の24時間キャッシュを利用する
+- カードチップをクリックしたときは、ホバー済みなら実際に価格を取れた出典へ、未ホバーなら選択中店舗モードに対応する価格ページへ開く。相談パネルには定型の会話スターターを置き、クリックするとそのまま送信する
+- `DeckContextData` にデッキ名・形式・ブラケット・説明と、候補セクションを保持する。サイドボード・候補は常にメイン外の独立リストとして送るため、通常の相談でもメインデッキの枚数・Game 1の構成を誤認しない。Commander判定時はEDHREC/Commander Spellbook、それ以外はMTGGoldfish/MTGTop8をWeb検索の優先情報源にする
+- Archidektの`Sideboard`は`includedInDeck=true`の場合があるため、カテゴリ名でも候補枠へ強制的に分離する。AIへはメインデッキ合計枚数を明示し、候補・サイドボードをメイン枚数に加えないよう指示する
+- AI相談をほぼ全画面表示した間は、`data-mtg-agent-fullscreen`とCSSで価格・日本語化進捗バッジを非表示にする
+
 ## 設計判断の経緯
 
 - **ドル価格の個別円置き換えは v0.11.0 で撤去**。Moxfieldのプレビュー価格はカード画像と小さな共通コンテナを持たず(共通祖先=ページ全体、img 77〜120個)、近接探索も「プレビュー画像を含まない階層で打ち切る」実装だったため安定しなかった。復活させる場合は「img多数階層で近接探索に失敗しても、さらに上の階層で探索を続ける」修正が有望(コードは v0.10.1 の src/price-overlay.ts)

@@ -40,6 +40,14 @@ export function frontFaceName(name: string): string {
   return name.split(' // ')[0].trim();
 }
 
+/** 価格の出典に対応するカード販売・価格ページURL。 */
+export function priceSourceUrl(cardName: string, linkHareruya: boolean): string {
+  const front = encodeURIComponent(frontFaceName(cardName));
+  return linkHareruya
+    ? `https://www.hareruyamtg.com/ja/products/search?product=${front}`
+    : `https://wonder.wisdom-guild.net/price/${front}/`;
+}
+
 export async function fetchHareruyaLowest(
   cardName: string,
 ): Promise<number | null> {

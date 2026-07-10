@@ -37,7 +37,16 @@ interface ScryfallCard {
   printed_text?: string;
   illustration_id?: string;
   image_uris?: ScryfallImageUris;
+  scryfall_uri?: string;
   card_faces?: ScryfallCardFace[];
+}
+
+/** チャット中のカード名チップ表示に必要な最小情報。 */
+export interface ChatCardDisplay {
+  englishName: string;
+  displayName: string;
+  imageUrl?: string;
+  scryfallUrl?: string;
 }
 
 /** 英語版の元printingに寄せるための選好情報 */
@@ -96,6 +105,8 @@ function enqueue<T>(fn: () => Promise<T>): Promise<T> {
 
 /** 進行中の同一カードのリクエストをまとめる */
 const inflight = new Map<string, Promise<JpLookupResult>>();
+const chatCardInflight = new Map<string, Promise<ChatCardDisplay | undefined>>();
+const chatCardCache = new Map<string, ChatCardDisplay | undefined>();
 
 function cacheKey(ref: CardRef): string {
   return ref.kind === 'scryfallId'
@@ -138,6 +149,56 @@ export async function lookupJapaneseImages(
   } finally {
     inflight.delete(key);
     lookupSettled();
+  }
+}
+
+/**
+ * チャットで表示するカードを英語Oracle名から解決する。
+ * 日本語版があれば日本語名・画像を優先し、なければ英語版の画像へフォールバックする。
+ */
+export async function lookupChatCard(
+  englishName: string,
+): Promise<ChatCardDisplay | undefined> {
+  const key = englishName.trim().toLowerCase();
+  if (!key) return undefined;
+  if (chatCardCache.has(key)) return chatCardCache.get(key);
+  const pending = chatCardInflight.get(key);
+  if (pending) return pending;
+
+  const promise = (async () => {
+    const jp = await lookupJapaneseImages({ kind: 'name', name: englishName });
+    if (jp) {
+      return {
+        englishName,
+        displayName: jp.jaName ?? englishName,
+        imageUrl: jp.front,
+      };
+    }
+
+    // 日本語printingが存在しないカードも、英語名と画像で閲覧できるようにする。
+    const card = await enqueue(async () => {
+      const res = await fetch(
+        `${API}/cards/named?exact=${encodeURIComponent(englishName)}`,
+      );
+      if (!res.ok) return undefined;
+      return (await res.json()) as ScryfallCard;
+    });
+    if (!card) return undefined;
+    return {
+      englishName: card.name,
+      displayName: card.name,
+      imageUrl: card.image_uris?.normal ?? card.card_faces?.[0]?.image_uris?.normal,
+      scryfallUrl: card.scryfall_uri,
+    };
+  })().catch(() => undefined);
+
+  chatCardInflight.set(key, promise);
+  try {
+    const result = await promise;
+    chatCardCache.set(key, result);
+    return result;
+  } finally {
+    chatCardInflight.delete(key);
   }
 }
 

@@ -8,6 +8,7 @@ export default defineConfig({
     permissions: ['storage'],
     host_permissions: [
       'https://api.scryfall.com/*',
+      'https://api.openai.com/*',
       'https://www.hareruyamtg.com/*',
       'https://wonder.wisdom-guild.net/*',
     ],

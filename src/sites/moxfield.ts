@@ -1,4 +1,5 @@
 import type { CardRef } from '../scryfall';
+import type { DeckContextData } from '../deck-context';
 import type { DeckEntry, SiteAdapter } from '../swapper';
 
 /**
@@ -39,6 +40,7 @@ export function createMoxfieldAdapter(): SiteAdapter {
   let cardMap = new Map<string, CardEntry>();
   /** メインデッキ+統率者の一覧(デッキ合計金額用) */
   let deckList: DeckEntry[] = [];
+  let deckContext: DeckContextData | null = null;
   let loadedDeckId: string | null = null;
   let loading: Promise<void> | null = null;
 
@@ -60,10 +62,12 @@ export function createMoxfieldAdapter(): SiteAdapter {
         if (!res.ok) throw new Error(`Moxfield API ${res.status}`);
         const json: unknown = await res.json();
         cardMap = collectCards(json);
-        deckList = collectDeckList(json);
+        deckContext = collectDeckContext(json);
+        deckList = deckContext.entries;
         loadedDeckId = deckId;
       } catch (e) {
         console.info('[MTG デッキ日本語化] デッキ情報の取得に失敗:', e);
+        deckContext = null;
         loadedDeckId = deckId; // リトライの嵐を避けるため失敗も記録
       } finally {
         loading = null;
@@ -109,6 +113,11 @@ export function createMoxfieldAdapter(): SiteAdapter {
     async getDeckList(): Promise<DeckEntry[] | null> {
       await ensureDeckData();
       return deckList.length > 0 ? deckList : null;
+    },
+
+    async getDeckContext(): Promise<DeckContextData | null> {
+      await ensureDeckData();
+      return deckContext;
     },
 
     isBackFace: (img) => {
@@ -164,14 +173,17 @@ function collectCards(
  * デッキ合計金額の対象になるボードだけから {英語名, 枚数} を集める。
  * サイドボード・検討中(maybeboard)は合計に含めない。
  */
-function collectDeckList(json: unknown): DeckEntry[] {
+function collectDeckContext(json: unknown): DeckContextData {
   const boards = (json as { boards?: Record<string, unknown> } | null)?.boards;
-  const out: DeckEntry[] = [];
-  if (boards === null || typeof boards !== 'object') return out;
-  for (const boardName of ['mainboard', 'commanders', 'companions']) {
+  const entries: DeckEntry[] = [];
+  const candidates: NonNullable<DeckContextData['candidates']> = [];
+  if (boards === null || typeof boards !== 'object') return { entries };
+
+  const boardEntries = (boardName: string): DeckEntry[] => {
+    const out: DeckEntry[] = [];
     const cards = (boards[boardName] as { cards?: Record<string, unknown> } | undefined)
       ?.cards;
-    if (cards === null || typeof cards !== 'object') continue;
+    if (cards === null || typeof cards !== 'object') return out;
     for (const entry of Object.values(cards)) {
       const e = entry as {
         quantity?: unknown;
@@ -184,10 +196,65 @@ function collectDeckList(json: unknown): DeckEntry[] {
         out.push({
           name,
           quantity,
+          isCommander: boardName === 'commanders',
           scryfallId: typeof scryfallId === 'string' ? scryfallId : undefined,
         });
       }
     }
+    return out;
+  };
+
+  let mainboard = boardEntries('mainboard');
+  const sideboard = boardEntries('sideboard');
+  // 一部のMoxfieldレスポンスではmainboardがサイド込みの総数になり、sideboardにも
+  // 同じカードが重複して入る。全サイドカードがmainboard内に存在する場合だけ差し引く。
+  // 通常の「mainboardとsideboardが別」レスポンスには適用しない。
+  const mainboardCount = mainboard.reduce((total, entry) => total + entry.quantity, 0);
+  const sideboardCount = sideboard.reduce((total, entry) => total + entry.quantity, 0);
+  if (
+    // 75/15は通常の構築フォーマットのmain+side合算と判別できる場合だけ補正する。
+    // 同じカードをメインとサイド双方で採用する通常のレスポンスを誤って差し引かない。
+    mainboardCount === 75 &&
+    sideboardCount === 15 &&
+    sideboard.every((side) => {
+      const main = mainboard.find(
+        (entry) => entry.scryfallId === side.scryfallId || entry.name === side.name,
+      );
+      return main !== undefined && main.quantity >= side.quantity;
+    })
+  ) {
+    mainboard = mainboard
+      .map((entry) => {
+        const side = sideboard.find(
+          (candidate) =>
+            candidate.scryfallId === entry.scryfallId || candidate.name === entry.name,
+        );
+        return side ? { ...entry, quantity: entry.quantity - side.quantity } : entry;
+      })
+      .filter((entry) => entry.quantity > 0);
   }
-  return out;
+  entries.push(...mainboard, ...boardEntries('commanders'), ...boardEntries('companions'));
+  for (const boardName of Object.keys(boards)) {
+    if (['mainboard', 'commanders', 'companions'].includes(boardName)) continue;
+    if (!/side|maybe|consider/i.test(boardName)) continue;
+    const cards = boardEntries(boardName);
+    if (cards.length > 0) candidates.push({ label: boardName, entries: cards });
+  }
+  const root = json as Record<string, unknown>;
+  const string = (key: string): string | undefined =>
+    typeof root[key] === 'string' ? (root[key] as string) : undefined;
+  const scalar = (key: string): string | undefined => {
+    const value = root[key];
+    return typeof value === 'string' || typeof value === 'number' ? String(value) : undefined;
+  };
+  return {
+    entries,
+    candidates,
+    metadata: {
+      name: string('name'),
+      description: string('description'),
+      format: scalar('format') ?? string('formatName'),
+      bracket: scalar('bracket'),
+    },
+  };
 }

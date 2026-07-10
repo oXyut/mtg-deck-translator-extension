@@ -1,4 +1,6 @@
 import { startHoverZoom } from '../src/hover-zoom';
+import { startDeckAgentOverlay } from '../src/agent-overlay';
+import { getAgentSettings, watchAgentSettings } from '../src/agent/settings';
 import { startPriceOverlay } from '../src/price-overlay';
 import { createProgressBadge } from '../src/progress-badge';
 import { setProgressListener } from '../src/progress';
@@ -35,6 +37,18 @@ export default defineContentScript({
       () => settings.priceStore,
       badgeBottom,
     );
+
+    let agentSettings = await getAgentSettings();
+    const deckAgentOverlay = startDeckAgentOverlay(
+      adapter,
+      badgeBottom,
+      agentSettings.enabled,
+      () => settings.priceStore,
+    );
+    watchAgentSettings((next) => {
+      agentSettings = next;
+      deckAgentOverlay?.setEnabled(agentSettings.enabled);
+    });
 
     if (adapter.zoomSrc) {
       const zoomSrc = adapter.zoomSrc.bind(adapter);

@@ -1,4 +1,5 @@
 import type { CardRef } from '../scryfall';
+import type { DeckContextData } from '../deck-context';
 import type { DeckEntry, SiteAdapter } from '../swapper';
 
 /** Playtest画面のURL: /playtester-v2/{deckId} (旧 /playtester/ も許容) */
@@ -23,6 +24,7 @@ const ALT_NAME = /^(.+?) \([a-z0-9]+\) \S+$/;
 
 export function createArchidektAdapter(): SiteAdapter {
   let deckList: DeckEntry[] | null = null;
+  let deckContext: DeckContextData | null = null;
   let loadedDeckId: string | null = null;
   let loading: Promise<void> | null = null;
 
@@ -43,10 +45,12 @@ export function createArchidektAdapter(): SiteAdapter {
         // 同一オリジンの公開API
         const res = await fetch(`https://archidekt.com/api/decks/${deckId}/`);
         if (!res.ok) throw new Error(`Archidekt API ${res.status}`);
-        deckList = collectDeckList(await res.json());
+        deckContext = collectDeckContext(await res.json());
+        deckList = deckContext.entries;
       } catch (e) {
         console.info('[MTG デッキ日本語化] Archidektデッキ情報の取得に失敗:', e);
         deckList = null;
+        deckContext = null;
       } finally {
         loadedDeckId = deckId;
         loading = null;
@@ -110,6 +114,11 @@ export function createArchidektAdapter(): SiteAdapter {
       await ensureDeckData();
       return deckList;
     },
+
+    async getDeckContext(): Promise<DeckContextData | null> {
+      await ensureDeckData();
+      return deckContext;
+    },
   };
 }
 
@@ -117,8 +126,13 @@ export function createArchidektAdapter(): SiteAdapter {
  * ArchidektのデッキAPIレスポンスから合計金額の対象カードを集める。
  * includedInDeck=false のカテゴリ(Maybeboard等)に入っているカードは除外。
  */
-function collectDeckList(json: unknown): DeckEntry[] {
+function collectDeckContext(json: unknown): DeckContextData {
   const data = json as {
+    name?: string;
+    description?: string;
+    format?: string | number;
+    formatName?: string;
+    bracket?: string | number;
     categories?: Array<{ name?: string; includedInDeck?: boolean }>;
     cards?: Array<{
       quantity?: number;
@@ -127,25 +141,61 @@ function collectDeckList(json: unknown): DeckEntry[] {
     }>;
   } | null;
 
-  const excluded = new Set(
+  // ArchidektではSideboardがincludedInDeck=trueのことがあるため、カテゴリ名でも
+  // 明示的に候補枠へ振り分ける。そうしないと60枚構築を75枚メインと誤認する。
+  const candidateCategories = new Set(
     (data?.categories ?? [])
-      .filter((c) => c.includedInDeck === false && typeof c.name === 'string')
-      .map((c) => c.name as string),
+      .filter(
+        (c) =>
+          typeof c.name === 'string' &&
+          (c.includedInDeck === false || /sideboard|maybeboard|considering/i.test(c.name)),
+      )
+      .map((c) => (c.name as string).toLowerCase()),
   );
 
-  const out: DeckEntry[] = [];
+  const entries: DeckEntry[] = [];
+  const candidateEntries: DeckEntry[] = [];
   for (const entry of data?.cards ?? []) {
     const name = entry.card?.oracleCard?.name;
     const quantity = entry.quantity;
     if (typeof name !== 'string' || typeof quantity !== 'number' || quantity <= 0)
       continue;
-    if ((entry.categories ?? []).some((c) => excluded.has(c))) continue;
-    out.push({
+    const deckEntry: DeckEntry = {
       name,
       quantity,
+      isCommander: (entry.categories ?? []).some(
+        (category) => category.toLowerCase() === 'commander',
+      ),
       scryfallId:
         typeof entry.card?.uid === 'string' ? entry.card.uid : undefined,
-    });
+    };
+    if (
+      (entry.categories ?? []).some((category) =>
+        candidateCategories.has(category.toLowerCase()),
+      )
+    ) {
+      candidateEntries.push(deckEntry);
+    } else {
+      entries.push(deckEntry);
+    }
   }
-  return out;
+  return {
+    entries,
+    candidates:
+      candidateEntries.length > 0
+        ? [{ label: '検討中 / デッキ外カテゴリ', entries: candidateEntries }]
+        : [],
+    metadata: {
+      name: data?.name,
+      description: data?.description,
+      format:
+        typeof data?.format === 'string' || typeof data?.format === 'number'
+          ? String(data.format)
+          : data?.formatName,
+      bracket:
+        typeof data?.bracket === 'string' || typeof data?.bracket === 'number'
+          ? String(data.bracket)
+          : undefined,
+    },
+  };
 }
