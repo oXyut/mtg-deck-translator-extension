@@ -6,4 +6,4 @@ output/
 dev.log
 .DS_Store
 .env
-.venv/
+.venv
